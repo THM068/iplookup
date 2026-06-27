@@ -1,0 +1,37 @@
+<div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 backdrop-blur">
+    <!-- IP header -->
+    <div class="mb-6 flex items-center gap-3">
+        <span class="rounded-lg bg-blue-600/20 px-3 py-1 text-sm font-mono font-semibold text-blue-400">
+            {{ ip }}
+        </span>
+        {% if country_code.len() > 0 %}
+        <span class="rounded-lg bg-emerald-600/20 px-3 py-1 text-sm font-semibold text-emerald-400">
+            {{ country_code }}
+        </span>
+        {% endif %}
+    </div>
+
+    <!-- Data grid -->
+    <div class="grid grid-cols-2 gap-5">
+        <div>
+            <span class="block text-xs font-medium uppercase tracking-wider text-slate-500">City</span>
+            <p class="mt-1 text-base text-slate-200">{{ city }}</p>
+        </div>
+        <div>
+            <span class="block text-xs font-medium uppercase tracking-wider text-slate-500">Country</span>
+            <p class="mt-1 text-base text-slate-200">{{ country }}</p>
+        </div>
+        <div>
+            <span class="block text-xs font-medium uppercase tracking-wider text-slate-500">Latitude</span>
+            <p class="mt-1 text-base font-mono text-slate-200">{{ latitude }}</p>
+        </div>
+        <div>
+            <span class="block text-xs font-medium uppercase tracking-wider text-slate-500">Longitude</span>
+            <p class="mt-1 text-base font-mono text-slate-200">{{ longitude }}</p>
+        </div>
+        <div class="col-span-2">
+            <span class="block text-xs font-medium uppercase tracking-wider text-slate-500">Timezone</span>
+            <p class="mt-1 text-base text-slate-200">{{ timezone }}</p>
+        </div>
+    </div>
+</div>

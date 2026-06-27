@@ -17,4 +17,4 @@ source = "target/wasm32-wasip1/release/iplookup.wasm"
 allowed_outbound_hosts = []
 [component.iplookup.build]
 command = "cargo build --target wasm32-wasip1 --release && wizer --allow-wasi target/wasm32-wasip1/release/iplookup.wasm -o target/wasm32-wasip1/release/iplookup.wizered.wasm && mv target/wasm32-wasip1/release/iplookup.wizered.wasm target/wasm32-wasip1/release/iplookup.wasm"
-watch = ["src/**/*.rs", "Cargo.toml", "GeoLite2-City_20260605/GeoLite2-City.mmdb"]
+watch = ["src/**/*.rs", "Cargo.toml", "templates/**/*.html", "GeoLite2-City_20260605/GeoLite2-City.mmdb"]
