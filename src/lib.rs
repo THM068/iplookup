@@ -1,11 +1,10 @@
+mod controllers;
+
 use askama::Template;
 use once_cell::sync::OnceCell;
-use spin_sdk::http::{IntoResponse, Response};
+use spin_sdk::http::{IntoResponse, Router};
 use spin_sdk::http_component;
-use std::net::IpAddr;
-use std::str::FromStr;
 
-use maxminddb::geoip2::City;
 use serde::Serialize;
 
 // ── Embed the MaxMind database into the binary ─────────────────
@@ -23,7 +22,7 @@ struct IndexTemplate;
 
 #[derive(Template)]
 #[template(path = "result.html")]
-struct ResultTemplate {
+pub struct ResultTemplate {
     ip: String,
     city: String,
     country: String,
@@ -35,7 +34,7 @@ struct ResultTemplate {
 
 #[derive(Template)]
 #[template(path = "error.html")]
-struct ErrorTemplate {
+pub struct ErrorTemplate {
     message: String,
 }
 
@@ -54,192 +53,17 @@ extern "C" fn pre_init() {
 // ── Spin HTTP handler ──────────────────────────────────────────
 
 #[http_component]
-fn handle_iplookup(req: spin_sdk::http::Request) -> anyhow::Result<impl IntoResponse> {
-    let path: &str = req
-        .header("spin-path-info")
-        .and_then(|v| v.as_str())
-        .unwrap_or("/");
-
-    // ── Route: / → serve the HTML page ──────────────────────
-    if path == "/" || path.is_empty() {
-        let html = IndexTemplate.render()?;
-        return Ok(Response::builder()
-            .status(200)
-            .header("content-type", "text/html; charset=utf-8")
-            .body(html)
-            .build());
-    }
-
-    // ── Route: /lookup?ip=... → HTML fragment for HTMX ──────
-    if path == "/lookup" {
-        let query = extract_query(&req);
-        let ip_str = parse_query_param(&query, "ip").unwrap_or("");
-
-        if ip_str.is_empty() {
-            let html = ErrorTemplate {
-                message: "Please enter an IP address.".into(),
-            }
-            .render()?;
-            return Ok(Response::builder()
-                .status(200)
-                .header("content-type", "text/html; charset=utf-8")
-                .body(html)
-                .build());
-        }
-
-        let ip = match IpAddr::from_str(ip_str) {
-            Ok(ip) => ip,
-            Err(_) => {
-                let html = ErrorTemplate {
-                    message: format!("\u{201c}{ip_str}\u{201d} is not a valid IP address."),
-                }
-                .render()?;
-                return Ok(Response::builder()
-                    .status(200)
-                    .header("content-type", "text/html; charset=utf-8")
-                    .body(html)
-                    .build());
-            }
-        };
-
-        let reader = DB_READER
-            .get()
-            .expect("DB_READER was not initialized");
-
-        match reader.lookup::<City<'_>>(ip) {
-            Ok(city) => {
-                let html = ResultTemplate {
-                    ip: ip.to_string(),
-                    city: name_en(&city.city),
-                    country: name_en(&city.country),
-                    country_code: city
-                        .country
-                        .as_ref()
-                        .and_then(|c| c.iso_code)
-                        .unwrap_or("")
-                        .to_string(),
-                    latitude: city
-                        .location
-                        .as_ref()
-                        .and_then(|l| l.latitude)
-                        .map(|v| format!("{:.4}", v))
-                        .unwrap_or_default(),
-                    longitude: city
-                        .location
-                        .as_ref()
-                        .and_then(|l| l.longitude)
-                        .map(|v| format!("{:.4}", v))
-                        .unwrap_or_default(),
-                    timezone: city
-                        .location
-                        .as_ref()
-                        .and_then(|l| l.time_zone)
-                        .unwrap_or("")
-                        .to_string(),
-                }
-                .render()?;
-                return Ok(Response::builder()
-                    .status(200)
-                    .header("content-type", "text/html; charset=utf-8")
-                    .body(html)
-                    .build());
-            }
-            Err(maxminddb::MaxMindDBError::AddressNotFoundError(_)) => {
-                let html = ErrorTemplate {
-                    message: "IP address not found in database.".into(),
-                }
-                .render()?;
-                return Ok(Response::builder()
-                    .status(200)
-                    .header("content-type", "text/html; charset=utf-8")
-                    .body(html)
-                    .build());
-            }
-            Err(e) => {
-                let html = ErrorTemplate {
-                    message: format!("Lookup error: {e}"),
-                }
-                .render()?;
-                return Ok(Response::builder()
-                    .status(200)
-                    .header("content-type", "text/html; charset=utf-8")
-                    .body(html)
-                    .build());
-            }
-        }
-    }
-
-    // ── Route: /{ip} → JSON (existing behaviour) ────────────
-    let ip_str = path.trim_start_matches('/').trim();
-
-    if ip_str.is_empty() {
-        return Ok(Response::builder()
-            .status(400)
-            .header("content-type", "application/json")
-            .body(serde_json::to_string(&JsonError {
-                error: "no IP address in path \u{2014} try /8.8.8.8",
-            })?)
-            .build());
-    }
-
-    let ip = IpAddr::from_str(ip_str)
-        .map_err(|_| anyhow::anyhow!("invalid IP address: {ip_str}"))?;
-
-    let reader = DB_READER
-        .get()
-        .expect("DB_READER was not initialized");
-
-    match reader.lookup::<City<'_>>(ip) {
-        Ok(city) => {
-            let result = JsonResult {
-                ip: ip.to_string(),
-                city: name_en(&city.city),
-                country: name_en(&city.country),
-                country_code: city
-                    .country
-                    .as_ref()
-                    .and_then(|c| c.iso_code)
-                    .map(|c| c.to_string()),
-                latitude: city.location.as_ref().and_then(|l| l.latitude),
-                longitude: city.location.as_ref().and_then(|l| l.longitude),
-                timezone: city
-                    .location
-                    .as_ref()
-                    .and_then(|l| l.time_zone)
-                    .map(|t| t.to_string()),
-            };
-            Ok(Response::builder()
-                .status(200)
-                .header("content-type", "application/json")
-                .body(serde_json::to_string(&result)?)
-                .build())
-        }
-        Err(maxminddb::MaxMindDBError::AddressNotFoundError(_)) => Ok(Response::builder()
-            .status(404)
-            .header("content-type", "application/json")
-            .body(serde_json::to_string(&JsonError {
-                error: "IP address not found in database",
-            })?)
-            .build()),
-        Err(e) => Err(anyhow::anyhow!("MaxMind lookup error: {e}")),
-    }
+fn handle_iplookup(req: spin_sdk::http::Request) -> anyhow::Result<impl IntoResponse, anyhow::Error> {
+    let mut router = Router::default();
+    
+    router.get("/", controllers::index::handle_index);
+    router.get("/lookup", controllers::lookup::handle_lookup);
+    Ok(router.handle(req))
 }
 
 // ── Helpers ────────────────────────────────────────────────────
 
-/// Extract the query string from the `spin-full-url` header
-/// (e.g. "http://localhost:3000/lookup?ip=8.8.8.8" -> "ip=8.8.8.8").
-fn extract_query(req: &spin_sdk::http::Request) -> String {
-    let full_url: &str = req
-        .header("spin-full-url")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    full_url
-        .split('?')
-        .nth(1)
-        .unwrap_or("")
-        .to_string()
-}
+
 
 fn name_en<N>(named: &Option<N>) -> String
 where
